@@ -1,14 +1,10 @@
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from config import API_TOKEN
-from handlers import register_handlers
 
+# Initialize FSM memory storage
 storage = MemoryStorage()
+
+# Initialize bot and dispatcher
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
-
-register_handlers(dp)
-
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+dp = Dispatcher(bot, storage=storage)
