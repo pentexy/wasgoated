@@ -1,0 +1,8 @@
+Hello,
+
+I am reporting the user @{username} (ID: {user_id}) for sharing explicit pornographic content on Telegram, which is in direct violation of Telegram's community guidelines and policies. The content is harmful and offensive, and should be removed immediately.
+
+Reported on: {date}
+Reported by: Concerned user
+
+Thank you.
