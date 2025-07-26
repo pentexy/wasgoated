@@ -4,6 +4,7 @@ from aiogram.utils import executor
 from config import API_TOKEN
 from handlers import register_handlers
 
+storage = MemoryStorage()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
