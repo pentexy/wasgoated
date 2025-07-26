@@ -1,19 +1,27 @@
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram import executor
 from config import API_TOKEN
 
-# Initialize
+# Import handler registrations
+from goat.handlers.start import register_start
+from goat.handlers.add_account import register_add_account
+from goat.handlers.add_smtp import register_add_smtp
+from goat.handlers.report import register_report
+from goat.handlers.owner import register_owner
+
+# Setup storage and bot
 storage = MemoryStorage()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
-# ✅ Basic /start command
-@dp.message_handler(commands=['start'])
-async def start_cmd(message: types.Message):
-    await message.answer("✅ Bot is running!")
+# Register all handlers
+register_start(dp)
+register_add_account(dp)
+register_add_smtp(dp)
+register_report(dp)
+register_owner(dp)
 
-# ✅ Start the bot
 if __name__ == '__main__':
     print("🤖 Bot is running...")
     executor.start_polling(dp, skip_updates=True)
