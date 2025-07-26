@@ -1,75 +1,133 @@
 from aiogram import types
+from aiogram.dispatcher import FSMContext
+from aiogram.types import ReplyKeyboardRemove
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from config import API_ID, API_HASH
-from storage.utils import load_json, save_json
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError
+
 import os
+import asyncio
+from config import API_ID, API_HASH
+from storage.utils import save_json, load_json
 
 ACCOUNTS_FILE = 'data/telegram_accounts.json'
-SESSIONS_DIR = 'data/sessions'
-os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-user_states = {}
+account_login_sessions = {}
+
+class AddAccountStates(StatesGroup):
+    waiting_for_phone = State()
+    waiting_for_code = State()
+    waiting_for_password = State()
 
 def register_add_account(dp):
     @dp.callback_query_handler(lambda c: c.data == 'add_account')
-    async def prompt_phone(callback_query: types.CallbackQuery):
-        await callback_query.message.answer("Send the phone number to login (with +country_code)")
-        user_states[callback_query.from_user.id] = {'state': 'awaiting_phone'}
+    async def ask_phone(callback_query: types.CallbackQuery, state: FSMContext):
+        await callback_query.message.answer("📱 Enter the phone number (with +countrycode):")
+        await AddAccountStates.waiting_for_phone.set()
 
-    @dp.message_handler(lambda message: user_states.get(message.from_user.id, {}).get('state') == 'awaiting_phone')
-    async def handle_phone(message: types.Message):
+    @dp.message_handler(state=AddAccountStates.waiting_for_phone)
+    async def send_code(message: types.Message, state: FSMContext):
         phone = message.text.strip()
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
-        await client.connect()
+        session_name = f"sessions/{phone.replace('+', '')}"
+        os.makedirs("sessions", exist_ok=True)
+        client = TelegramClient(session_name, API_ID, API_HASH)
+
         try:
-            await client.send_code_request(phone)
-            session_str = client.session.save()
-            user_states[message.from_user.id] = {
-                'state': 'awaiting_code',
+            await client.connect()
+            sent = await client.send_code_request(phone)
+            account_login_sessions[message.from_user.id] = {
+                'client': client,
                 'phone': phone,
-                'session': session_str
+                'phone_code_hash': sent.phone_code_hash
             }
-            await message.answer("OTP sent. Please enter the code:")
+            await message.answer("✅ Code sent! Now enter the code you received:")
+            await AddAccountStates.waiting_for_code.set()
         except Exception as e:
-            await message.answer(f"Error: {e}")
+            await message.answer(f"❌ Failed to send code:\n{e}")
+            await state.finish()
 
-    @dp.message_handler(lambda message: user_states.get(message.from_user.id, {}).get('state') == 'awaiting_code')
-    async def handle_code(message: types.Message):
-        code = message.text.strip()
-        state = user_states.get(message.from_user.id, {})
-        client = TelegramClient(StringSession(state['session']), API_ID, API_HASH)
-        await client.connect()
-        try:
-            await client.sign_in(phone=state['phone'], code=code)
-        except Exception as e:
-            if '2FA' in str(e):
-                user_states[message.from_user.id]['state'] = 'awaiting_2fa'
-                await message.answer("2FA enabled. Please send your password:")
-                return
-            await message.answer(f"Login failed: {e}")
+    @dp.message_handler(state=AddAccountStates.waiting_for_code)
+    async def enter_code(message: types.Message, state: FSMContext):
+        data = account_login_sessions.get(message.from_user.id)
+        if not data:
+            await message.answer("Session expired. Please try again.")
+            await state.finish()
             return
-        await client.disconnect()
-        save_account(state['phone'], state['session'])
-        await message.answer(f"✅ Account Added Successfully!\nNumber: {state['phone']}")
-        user_states.pop(message.from_user.id, None)
 
-    @dp.message_handler(lambda message: user_states.get(message.from_user.id, {}).get('state') == 'awaiting_2fa')
-    async def handle_2fa(message: types.Message):
+        code = message.text.strip()
+        client = data['client']
+        phone = data['phone']
+        phone_code_hash = data['phone_code_hash']
+
+        try:
+            await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+            me = await client.get_me()
+            acc_data = {
+                "phone": phone,
+                "user_id": me.id,
+                "name": f"{me.first_name} {me.last_name or ''}".strip(),
+                "username": me.username or '',
+                "session": session_name
+            }
+
+            accounts = load_json(ACCOUNTS_FILE)
+            accounts.append(acc_data)
+            save_json(ACCOUNTS_FILE, accounts)
+
+            await message.answer(
+                f"✅ Account Added Successfully!\n📞 Number: {phone}\n🧾 Total Added Accs: {len(accounts)}",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await client.disconnect()
+            account_login_sessions.pop(message.from_user.id, None)
+            await state.finish()
+
+        except SessionPasswordNeededError:
+            await message.answer("🔐 This account has 2FA enabled. Enter the password:")
+            await AddAccountStates.waiting_for_password.set()
+        except PhoneCodeInvalidError:
+            await message.answer("❌ Invalid code. Try again:")
+        except Exception as e:
+            await message.answer(f"❌ Error: {e}")
+            await client.disconnect()
+            await state.finish()
+
+    @dp.message_handler(state=AddAccountStates.waiting_for_password)
+    async def enter_2fa_password(message: types.Message, state: FSMContext):
+        data = account_login_sessions.get(message.from_user.id)
+        if not data:
+            await message.answer("Session expired. Please try again.")
+            await state.finish()
+            return
+
         password = message.text.strip()
-        state = user_states.get(message.from_user.id, {})
-        client = TelegramClient(StringSession(state['session']), API_ID, API_HASH)
-        await client.connect()
+        client = data['client']
+
         try:
             await client.sign_in(password=password)
-            await client.disconnect()
-            save_account(state['phone'], state['session'])
-            await message.answer(f"✅ Account Added Successfully!\nNumber: {state['phone']}")
-        except Exception as e:
-            await message.answer(f"2FA login failed: {e}")
-        user_states.pop(message.from_user.id, None)
+            me = await client.get_me()
+            acc_data = {
+                "phone": data['phone'],
+                "user_id": me.id,
+                "name": f"{me.first_name} {me.last_name or ''}".strip(),
+                "username": me.username or '',
+                "session": data['client'].session.filename
+            }
 
-def save_account(phone, session):
-    accounts = load_json(ACCOUNTS_FILE)
-    accounts.append({'phone': phone, 'session': session})
-    save_json(ACCOUNTS_FILE, accounts)
+            accounts = load_json(ACCOUNTS_FILE)
+            accounts.append(acc_data)
+            save_json(ACCOUNTS_FILE, accounts)
+
+            await message.answer(
+                f"✅ 2FA Login Successful!\n📞 Number: {data['phone']}\n🧾 Total Added Accs: {len(accounts)}"
+            )
+            await client.disconnect()
+            account_login_sessions.pop(message.from_user.id, None)
+            await state.finish()
+        except Exception as e:
+            await message.answer(f"❌ 2FA Error: {e}")
+            await client.disconnect()
+            await state.finish()
