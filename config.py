@@ -1,4 +1,6 @@
-API_TOKEN = '8185730588:AAHkdJRV9ghuRb7M10sGnL5_8wW2SAypuuo'  # Replace with your bot token
-API_ID = 26416419  # Replace with your Telethon API ID
-API_HASH = 'c109c77f5823c847b1aeb7fbd4990cc4'  # Replace with your API hash
-OWNER_USERNAME = '@siyorou'
+API_ID = 22906249
+API_HASH = 'a8aa1616cda4920822ee4305908486d6'
+BOT_TOKEN = '7752926802:AAFUisXkjzyWxJQEe_e649W8xnMNwB-NjTU'
+OWNER_ID = 6806897901
+LOG_CHANNEL_ID = -1002453460259
+START_IMG_URL = "https://files.catbox.moe/8p2m0v.jpg"
